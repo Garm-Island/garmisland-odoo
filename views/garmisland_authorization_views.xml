@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <template id="authorize_page" name="OAuth Authorization Page">
+        <t t-call="web.layout">
+            <t t-set="html_data" t-value="{'lang': lang}"/>
+            <div class="container mt-5" style="max-width: 500px;">
+                <div class="card shadow-sm">
+                    <div class="card-body text-center">
+                        <!-- Client Application Name -->
+                        <h3 class="card-title mb-4">
+                            Authorize <t t-out="client.name"/>?
+                        </h3>
+                        
+                        <p class="text-muted mb-4">
+                            This application is requesting permission to access your Odoo account.
+                        </p>
+
+                        <!-- Approval Form -->
+                        <form action="/garm/oauth/approve" method="POST">
+                            <!-- CSRF Token (Required by your route) -->
+                            <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
+                            
+                            <!-- Hidden OAuth Context Fields -->
+                            <input type="hidden" name="client_id" t-att-value="client.client_id"/>
+                            <input type="hidden" name="redirect_uri" t-att-value="redirect_uri"/>
+                            <input type="hidden" name="state" t-att-value="state"/>
+
+                            <!-- Actions -->
+                            <div class="d-grid gap-2">
+                                <button type="submit" class="btn btn-primary btn-lg">
+                                    Approve Access
+                                </button>
+                                <a t-att-href="redirect_uri" class="btn btn-outline-secondary">
+                                    Cancel
+                                </a>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </t>
+    </template>
+</odoo>

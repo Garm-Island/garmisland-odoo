@@ -1,0 +1,3 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+garmisland.access_garm_oauth_client,access_garm_oauth_client,garmisland.model_garm_oauth_client,base.group_user,1,0,0,0
+garmisland.access_garm_oauth_code,access_garm_oauth_code,garmisland.model_garm_oauth_code,base.group_user,1,0,0,0

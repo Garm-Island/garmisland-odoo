@@ -28,6 +28,23 @@ class GarmProductController(http.Controller):
 
         return result
 
+    def normalizeListProducts(self, product):
+            result = []
+            for val in product:
+                # Convert non-serializable fields (like dates or custom objects) into safe types
+                if isinstance(val, tuple):
+                    result.append(list(val)) # Convert tuple to JSON-friendly list
+                if isinstance(val, dict):
+                    result.append(self.normalizeProducts(val)) # Convert tuple to JSON-friendly list
+                else:
+                    try:
+                        json.dumps(val) # Test if it can be serialized
+                        result.append(val)
+                    except TypeError:
+                        result.append(str(val)) # Fallback to string representation
+    
+            return result
+
     @http.route(
         '/garm/products',
         type='http',
@@ -99,7 +116,7 @@ class GarmProductController(http.Controller):
                     headers=[('Content-Type', 'application/json')]
                 )
 
-        products_data = product_model.search_read(
+        products_data = product_model.search(
             domain=domain,
             limit=limit + 1,
             order="id asc"
@@ -119,7 +136,36 @@ class GarmProductController(http.Controller):
 
         clean_products = []
         for prod in products_data:
-            clean_products.append(self.normalizeProducts(prod))
+            attribute_lines = request.env["product.template.attribute.line"].sudo().search(
+                domain=[('product_tmpl_id', '=', prod.id)]
+            )
+    
+            serialized_attributes = []
+            for line in attribute_lines:
+                
+                tmpl_attribute_values = request.env["product.template.attribute.value"].sudo().search([
+                    ('product_tmpl_id', '=', prod.id),
+                    ('attribute_id', '=', line.attribute_id.id)
+                ])
+    
+                values_list = []
+                for tmpl_val in tmpl_attribute_values:
+                    values_list.append({
+                        "value_id": tmpl_val.product_attribute_value_id.id, # The core global value ID
+                        "value_name": tmpl_val.name,                         # The name (e.g., "XL")
+                        "price_extra": tmpl_val.price_extra                 # The variant surcharge price (e.g., 5.0)
+                    })
+    
+                serialized_attributes.append({
+                    "attribute_line_id": line.id,
+                    "attribute_id": line.attribute_id.id,
+                    "attribute_name": line.attribute_id.name,
+                    "values": values_list
+                })
+
+            prod_obj = self.normalizeProducts(prod.read()[0])
+            prod_obj['attribute'] = serialized_attributes
+            clean_products.append(prod_obj)
 
         context = {
             "products": clean_products,
@@ -170,6 +216,34 @@ class GarmProductController(http.Controller):
             )
         
         products_data = self.normalizeProducts(product.read()[0])
+        attribute_lines = request.env["product.template.attribute.line"].sudo().search(
+            domain=[('product_tmpl_id', '=', product_id)]
+        )
+
+        serialized_attributes = []
+        for line in attribute_lines:
+            
+            tmpl_attribute_values = request.env["product.template.attribute.value"].sudo().search([
+                ('product_tmpl_id', '=', product_id),
+                ('attribute_id', '=', line.attribute_id.id)
+            ])
+
+            values_list = []
+            for tmpl_val in tmpl_attribute_values:
+                values_list.append({
+                    "value_id": tmpl_val.product_attribute_value_id.id, # The core global value ID
+                    "value_name": tmpl_val.name,                         # The name (e.g., "XL")
+                    "price_extra": tmpl_val.price_extra                 # The variant surcharge price (e.g., 5.0)
+                })
+
+            serialized_attributes.append({
+                "attribute_line_id": line.id,
+                "attribute_id": line.attribute_id.id,
+                "attribute_name": line.attribute_id.name,
+                "values": values_list
+            })
+
+        products_data["attribute"] = serialized_attributes
 
         context = {
             "product": products_data
@@ -234,6 +308,122 @@ class GarmProductController(http.Controller):
                 "metadata": {
                     "total_count": total_count
                 }
+            }
+    
+            return Response(
+                json.dumps(context),
+                status=200,
+                headers=[('Content-Type', 'application/json')]
+            )
+
+    @http.route(
+        '/garm/product/<int:product_id>/variants',
+        type='http',
+        auth='public',
+        methods=['GET'],
+        csrf=False
+    )
+    def product_variants(self, product_id, **kwargs):
+            oauth = authenticate()
+    
+            if not oauth:
+                return Response(
+                    json.dumps({
+                        "error": "unauthorized",
+                        "error_description": "Unauthorized access"
+                    }),
+                    status=400,
+                    headers=[('Content-Type', 'application/json')]
+                )
+
+            product = request.env["product.template"].sudo().browse(product_id)
+
+            if not product.exists():
+                return Response(
+                    json.dumps({
+                        "error": "product_not_found",
+                        "error_description": "Product not found"
+                    }), 
+                    status=400,
+                    headers=[('Content-Type', 'application/json')]
+                )
+    
+            variants = request.env["product.product"].sudo().search_read(
+                domain=[('product_tmpl_id', '=', product_id), ('active', '=', True)]
+            )
+    
+            
+            clean_variants = []
+
+            for variant in variants:
+                variant_obj = self.normalizeProducts(variant)
+
+                clean_variants.append(variant_obj)
+    
+            context = {
+                "variants": clean_variants
+            }
+    
+            return Response(
+                json.dumps(context),
+                status=200,
+                headers=[('Content-Type', 'application/json')]
+            )
+
+    @http.route(
+        '/garm/product/<int:product_id>/attributes',
+        type='http',
+        auth='public',
+        methods=['GET'],
+        csrf=False
+    )
+    def product_attributes(self, product_id, **kwargs):
+            oauth = authenticate()
+    
+            if not oauth:
+                return Response(
+                    json.dumps({
+                        "error": "unauthorized",
+                        "error_description": "Unauthorized access"
+                    }),
+                    status=400,
+                    headers=[('Content-Type', 'application/json')]
+                )
+
+            product = request.env["product.template"].sudo().browse(product_id)
+
+            if not product.exists():
+                return Response(
+                    json.dumps({
+                        "error": "product_not_found",
+                        "error_description": "Product not found"
+                    }), 
+                    status=400,
+                    headers=[('Content-Type', 'application/json')]
+                )
+
+            structured_attributes = []
+
+            for line in product.attribute_line_ids:
+                # Gather all individual value options defined for this product line
+                values_list = []
+                
+                for val in line.value_ids:
+                    values_list.append({
+                        "value_id": val.id,
+                        "value_name": val.name
+                    })
+
+                # Append the parent attribute along with its choices
+                structured_attributes.append({
+                    "attribute_line_id": line.id,
+                    "attribute_id": line.attribute_id.id,
+                    "attribute_name": line.attribute_id.name, # e.g., "Color" or "Size"
+                    "values": values_list                      # e.g., [{"value_id": 1, "value_name": "Red"}]
+                })
+    
+            context = {
+                "attributes": structured_attributes
             }
     
             return Response(

@@ -180,3 +180,64 @@ class GarmProductController(http.Controller):
             status=200,
             headers=[('Content-Type', 'application/json')]
         )
+
+    @http.route(
+        '/garm/product/categories',
+        type='http',
+        auth='public',
+        methods=['GET'],
+        csrf=False
+    )
+    def product_categories(self, **kwargs):
+            oauth = authenticate()
+    
+            if not oauth:
+                return Response(
+                    json.dumps({
+                        "error": "unauthorized",
+                        "error_description": "Unauthorized access"
+                    }),
+                    status=400,
+                    headers=[('Content-Type', 'application/json')]
+                )
+    
+            category_model = request.env["product.category"].sudo()
+            
+            domain = []
+    
+    
+            total_count = category_model.search_count(
+                domain=domain
+            )
+    
+            categories_data = category_model.search_read(
+                domain=domain,
+                fields=["id", "name", "parent_id", "complete_name"],
+                order="complete_name asc"
+            )
+    
+            
+            clean_categories = []
+            for category in categories_data:
+                category_obj = self.normalizeProducts(category)
+
+                product_count = request.env["product.template"].sudo().search_count([
+                    ('categ_id', 'child_of', category_obj['id'])
+                ])
+
+                category_obj['product_count'] = product_count
+
+                clean_categories.append(category_obj)
+    
+            context = {
+                "categories": clean_categories,
+                "metadata": {
+                    "total_count": total_count
+                }
+            }
+    
+            return Response(
+                json.dumps(context),
+                status=200,
+                headers=[('Content-Type', 'application/json')]
+            )

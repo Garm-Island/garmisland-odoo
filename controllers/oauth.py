@@ -143,7 +143,7 @@ class GarmOAuthController(http.Controller):
 
     @http.route(
         '/garm/oauth/token',
-        type='json',
+        type='http',
         auth='public',
         methods=['POST'],
         csrf=False
@@ -178,10 +178,14 @@ class GarmOAuthController(http.Controller):
         ], limit=1)
 
         if not client:
-            return {
-                "error": "invalid_client",
-                "error_description": "Missing or inactive client."
-            }
+            return Response(
+                json.dumps({
+                    "error": "invalid_client",
+                    "error_description": "Missing or inactive client."
+                }),
+                status=200,
+                headers=[('Content-Type', 'application/json')]
+            )
 
         auth_code = request.env[
             "garm.oauth.code"
@@ -192,16 +196,24 @@ class GarmOAuthController(http.Controller):
         ], limit=1)
 
         if not auth_code:
-            return {
-                "error": "invalid_grant",
-                "error_description": "Invalid authorization code."
-            }
+            return Response(
+                json.dumps({
+                    "error": "invalid_grant",
+                    "error_description": "Invalid authorization code."
+                }),
+                status=200,
+                headers=[('Content-Type', 'application/json')]
+            )
 
         if auth_code.expires_at < fields.Datetime.now():
-            return {
-                "error": "expired_code",
-                "error_description": "Authorization code has expired."
-            }
+            return Response(
+                json.dumps({
+                    "error": "expired_code",
+                    "error_description": "Authorization code has expired."
+                }),
+                status=200,
+                headers=[('Content-Type', 'application/json')]
+            )
 
         auth_code.used = True
 
@@ -223,5 +235,8 @@ class GarmOAuthController(http.Controller):
             'access_token': access_token,
             'token_type': "Bearer"
         }
-
-        return context
+        return Response(
+            json.dumps(context),
+            status=200,
+            headers=[('Content-Type', 'application/json')]
+        )

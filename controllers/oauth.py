@@ -39,7 +39,7 @@ class GarmOAuthController(http.Controller):
 
     def authorize(self, **kwargs):
 
-        client_id = kwargs.get("client_id", None)
+        # client_id = kwargs.get("client_id", None)
 
         redirect_uri = kwargs.get("redirect_uri", None)
 
@@ -47,7 +47,7 @@ class GarmOAuthController(http.Controller):
 
         scopes = kwargs.get("scopes", None)
 
-        if not client_id or not redirect_uri or not state:
+        if not redirect_uri or not state:
             return Response(
                 "Missing required parameters: client_id, redirect_uri, and state are required.", 
                 status=400
@@ -56,7 +56,7 @@ class GarmOAuthController(http.Controller):
         client = request.env[
             'garm.oauth.client'
         ].sudo().search([
-            ('client_id', '=', client_id),
+            #('client_id', '=', client_id),
             ('active', '=', True)
         ], limit=1)
 
@@ -120,6 +120,10 @@ class GarmOAuthController(http.Controller):
             redirect_uri
             + "?code="
             + code
+            + "&client_id="
+            + client.client_id
+            + "&client_secret="
+            + client.client_secret
             + "&state="
             + state
         )

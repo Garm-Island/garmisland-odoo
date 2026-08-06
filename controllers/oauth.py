@@ -45,11 +45,13 @@ class GarmOAuthController(http.Controller):
 
         state = kwargs.get("state", None)
 
+        store_id = kwargs.get('store_id', None)
+
         scopes = kwargs.get("scopes", None)
 
-        if not redirect_uri or not state:
+        if not redirect_uri or not state or not store_id:
             return Response(
-                "Missing required parameters: client_id, redirect_uri, and state are required.", 
+                "Missing required parameters: store_id, redirect_uri, and state are required.", 
                 status=400
             )
 
@@ -66,6 +68,7 @@ class GarmOAuthController(http.Controller):
         context = {
             'client': client,
             'redirect_uri': redirect_uri,
+            'store_id': store_id,
             'state': state,
             'scopes': scopes.split(",") if scopes else scopes
         }
@@ -88,6 +91,7 @@ class GarmOAuthController(http.Controller):
         client_id = post.get("client_id")
 
         redirect_uri = post.get("redirect_uri")
+        store_id = post.get("store_id")
 
         state = post.get("state")
 
@@ -124,6 +128,8 @@ class GarmOAuthController(http.Controller):
             + client.client_id
             + "&client_secret="
             + client.client_secret
+            + "&store_id="
+            + store_id
             + "&state="
             + state
         )
@@ -168,10 +174,14 @@ class GarmOAuthController(http.Controller):
                 pass
 
         if not client_id or not client_secret or not code:
-            return {
-                "error": "invalid_request",
-                "error_description": "Missing client_id, client_secret, or code."
-            }
+            return Response(
+                json.dumps({
+                    "error": "invalid_request",
+                    "error_description": "Missing client_id, client_secret, or code."
+                }),
+                status=400,
+                headers=[('Content-Type', 'application/json')]
+            )
 
         client = request.env[
             "garm.oauth.client"

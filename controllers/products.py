@@ -66,13 +66,17 @@ class GarmProductController(http.Controller):
             )
 
         try:
-            limit = max(1, int(kwargs.get('limit', 150)))   # Default to 150 items per page
+            count_only = kwargs.get('count_only', None)
+            limit = max(1, int(kwargs.get('limit', 100)))
             cursor = kwargs.get('cursor', None)
             status = kwargs.get('status', None)
+            cat_id = kwargs.get('category', None)
         except ValueError:
             limit = 150
             status = None
             cursor = None
+            cat_id = None
+            count_only = None
 
         product_model = request.env["product.template"].sudo()
         
@@ -95,10 +99,26 @@ class GarmProductController(http.Controller):
 
                 domain.append(('active', '=', False))
 
+        if cat_id:
+            domain.append(('categ_id', '=', cat_id))
 
         total_count = product_model.search_count(
             domain=domain
         )
+
+        if count_only and count_only == "1":
+            context = {
+                "metadata": {
+                    "total_count": total_count
+                }
+            }
+
+            return Response(
+                json.dumps(context),
+                status=200,
+                headers=[('Content-Type', 'application/json')]
+            )
+
 
         if cursor:
             try:

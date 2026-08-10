@@ -45,6 +45,48 @@ class GarmProductController(http.Controller):
     
             return result
 
+    def getProductStatus(self, product):
+
+        if product['active'] and not product['is_published']:
+            return "draft"
+
+        if product['active'] and product['is_published'] and product['sale_ok']:
+            return "active"
+
+        if not product['active']:
+            return "archived"
+        
+        return "unknown"
+
+    def addCustomProductFields(self, product, products_data, serialized_attributes):
+        base_url = request.env['ir.config_parameter'].sudo().get_param('web.base.url')
+
+        unique_hash = product.write_date.strftime('%Y%m%d%H%M%S') if product.write_date else '1'
+        main_image_url = f"{base_url}/web/image?model=product.template&id={product.id}&field=image_1920&unique={unique_hash}"
+        
+        media = request.env['product.image'].search([('product_tmpl_id', '=', product.id)])
+        tags_data = []
+        for tag in product['product_tag_ids']:
+            tags_data.append({
+                'tag_id': tag['id'],
+                'tag_name': tag['name'],
+                'color_index': tag['color']
+            })
+
+        products_data["attribute"] = serialized_attributes
+        products_data['status'] = self.getProductStatus(products_data)
+        products_data['slug'] = f"{request.env['ir.http']._slugify(products_data['name'])}-{products_data['id']}"
+        products_data['website_description'] = products_data['website_description'] or ''
+        products_data['description_ecommerce'] = products_data['description_ecommerce'] or ''
+        products_data['display_image'] = {
+            'id': media.id,
+            'name': media.name,
+            'url': main_image_url
+        }
+        products_data['tags'] = tags_data
+
+        return products_data
+
     @http.route(
         '/garm/products',
         type='http',
@@ -185,6 +227,7 @@ class GarmProductController(http.Controller):
 
             prod_obj = self.normalizeProducts(prod.read()[0])
             prod_obj['attribute'] = serialized_attributes
+            prod_obj['status'] = self.getProductStatus(prod_obj)
             clean_products.append(prod_obj)
 
         context = {
@@ -235,7 +278,9 @@ class GarmProductController(http.Controller):
                 headers=[('Content-Type', 'application/json')]
             )
         
-        products_data = self.normalizeProducts(product.read()[0])
+        product_obj = product.read()[0]
+
+        products_data = self.normalizeProducts(product_obj)
         attribute_lines = request.env["product.template.attribute.line"].sudo().search(
             domain=[('product_tmpl_id', '=', product_id)]
         )
@@ -263,7 +308,7 @@ class GarmProductController(http.Controller):
                 "values": values_list
             })
 
-        products_data["attribute"] = serialized_attributes
+        products_data = self.addCustomProductFields(product, products_data, serialized_attributes)
 
         context = {
             "product": products_data

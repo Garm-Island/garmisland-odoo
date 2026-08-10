@@ -226,8 +226,9 @@ class GarmProductController(http.Controller):
                 })
 
             prod_obj = self.normalizeProducts(prod.read()[0])
-            prod_obj['attribute'] = serialized_attributes
-            prod_obj['status'] = self.getProductStatus(prod_obj)
+            prod_obj = self.addCustomProductFields(prod, prod_obj, serialized_attributes)
+            # prod_obj['attribute'] = serialized_attributes
+            # prod_obj['status'] = self.getProductStatus(prod_obj)
             clean_products.append(prod_obj)
 
         context = {

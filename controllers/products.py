@@ -91,7 +91,7 @@ class GarmProductController(http.Controller):
             domain=[('product_tmpl_id', '=', product.id), ('active', '=', True)]
         )
 
-        variant_map = {}
+        variant_map = []
 
         for variant in variants:
             website_url             = variant.website_url
@@ -104,14 +104,29 @@ class GarmProductController(http.Controller):
 
                 if param_obj.get('attribute_values', None):
                     attribute_values = param_obj["attribute_values"]
+            
+            attribute_data = [];
 
-            variant_map[attribute_values] = {
+            for ptav in variant.product_template_attribute_value_ids:
+
+                attribute_name = ptav.attribute_id.name
+                
+                value_name = ptav.name  
+                
+                attribute_data.append({
+                    "value_id": ptav.product_attribute_value_id.id,
+                    "value_name": value_name,
+                    "attribute_name": attribute_name 
+                })
+
+            variant_map.append({
                 "variant_id"    : variant.id,
                 "sequence"      : variant.sequence,
                 "list_price"    : variant.list_price,
                 "quantity"      : variant.qty_available,
-                'website_url'   : variant.website_url  
-            }
+                'website_url'   : variant.website_url,
+                'attribute_data': attribute_data
+            })
 
         products_data['product_variants'] = variant_map
         return products_data

@@ -5,6 +5,7 @@ import logging
 import json
 import math
 import base64
+from urllib.parse import parse_qsl
 from .oauth import authenticate
 
 logger = logging.getLogger(__name__)
@@ -85,6 +86,34 @@ class GarmProductController(http.Controller):
         }
         products_data['tags'] = tags_data
 
+
+        variants = request.env["product.product"].sudo().search(
+            domain=[('product_tmpl_id', '=', product.id), ('active', '=', True)]
+        )
+
+        variant_map = {}
+
+        for variant in variants:
+            website_url             = variant.website_url
+            website_param_split     = str(website_url).split("#")
+            attribute_values        = None
+
+            if len(website_param_split) > 1: 
+                param_values  = website_param_split[1]
+                param_obj     = dict(parse_qsl(param_values))
+
+                if param_obj.get('attribute_values', None):
+                    attribute_values = param_obj["attribute_values"]
+
+            variant_map[attribute_values] = {
+                "variant_id"    : variant.id,
+                "sequence"      : variant.sequence,
+                "list_price"    : variant.list_price,
+                "quantity"      : variant.qty_available,
+                'website_url'   : variant.website_url  
+            }
+
+        products_data['product_variants'] = variant_map
         return products_data
 
     @http.route(

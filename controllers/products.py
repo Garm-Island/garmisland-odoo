@@ -98,6 +98,11 @@ class GarmProductController(http.Controller):
             website_param_split     = str(website_url).split("#")
             attribute_values        = None
 
+            unique_vr_hash = variant.write_date.strftime('%Y%m%d%H%M%S') if variant.write_date else '1'
+            variant_image_url = f"{base_url}/web/image?model=product.product&id={variant.id}&field=image_1920&unique={unique_vr_hash}"
+            
+            vr_media = request.env['product.image'].search([('product_tmpl_id', '=', variant.id)])
+
             if len(website_param_split) > 1: 
                 param_values  = website_param_split[1]
                 param_obj     = dict(parse_qsl(param_values))
@@ -122,9 +127,14 @@ class GarmProductController(http.Controller):
             variant_map.append({
                 "variant_id"    : variant.id,
                 "sequence"      : variant.sequence,
-                "list_price"    : variant.list_price,
+                "list_price"    : variant.price_extra,
                 "quantity"      : variant.qty_available,
                 'website_url'   : variant.website_url,
+                'display_image' : {
+                    'id': vr_media.id,
+                    'name': vr_media.name,
+                    'url': variant_image_url
+                },
                 'attribute_data': attribute_data
             })
 
@@ -186,7 +196,7 @@ class GarmProductController(http.Controller):
                 domain.append(('active', '=', False))
 
         if cat_id:
-            domain.append(('categ_id', '=', cat_id))
+            domain.append(('categ_id', 'child_of', int(cat_id)))
 
         total_count = product_model.search_count(
             domain=domain

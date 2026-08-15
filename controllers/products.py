@@ -59,6 +59,28 @@ class GarmProductController(http.Controller):
         
         return "unknown"
 
+    def setProductStatus(self, status):
+        
+        if status == "active":
+            
+            return {
+                "active": True,
+                "is_published": True,
+                "sale_ok": True
+            }
+
+        if status == "archived":
+            return {
+                "active": False,
+                "is_published": False,
+                "sale_ok": False
+            }
+        
+        return {
+            "active": True,
+            "is_published": False
+        }
+
     def addCustomProductFields(self, product, products_data, serialized_attributes):
         base_url = request.env['ir.config_parameter'].sudo().get_param('web.base.url')
 
@@ -551,3 +573,166 @@ class GarmProductController(http.Controller):
                 status=200,
                 headers=[('Content-Type', 'application/json')]
             )
+
+
+    def setProductTags(self, tags):
+        tag_commands = []
+            
+        if tags and isinstance(tags, list):
+            for tag_name in tags:
+                tag_name = str(tag_name).lower().strip()
+
+                tag = request.env['product.tag'].search([('name', '=', tag_name)], limit=1)
+
+                if not tag:
+                    tag = request.env['product.tag'].sudo().create({'name': tag_name})
+                
+                tag_commands.append((4, tag.id))
+
+        return {
+            "product_tag_ids": tag_commands
+        }
+
+    @http.route(
+        '/garm/product',
+        type='http',
+        auth='public',
+        methods=['POST'],
+        csrf=False
+    )
+    def create_product(self, **post):
+        oauth = authenticate()
+
+        if not oauth:
+            return Response(
+                json.dumps({
+                    "error": "unauthorized",
+                    "error_description": "Unauthorized access"
+                }),
+                status=400,
+                headers=[('Content-Type', 'application/json')]
+            )
+
+        try:
+            if not post and request.httprequest.data:
+                try:
+                    post = json.loads(request.httprequest.data.decode('utf-8'))
+                except ValueError:
+                    return Response(
+                        json.dumps({
+                            "error": "invalid_json",
+                            "error_description": "Malformed JSON payload"
+                        }),
+                        status=400,
+                        headers=[('Content-Type', 'application/json')]
+                    )
+
+            required_fields = ["status", "tag_names"]
+
+            for field in required_fields:
+
+                if not post.get(field, None):
+                    return Response(
+                        json.dumps({
+                            "error": "missing_field",
+                            "error_description": f"{field} field is missing"
+                        }),
+                        status=400,
+                        headers=[('Content-Type', 'application/json')]
+                    )
+
+            product_val = {
+                **post, 
+                **self.setProductStatus(post.get("status", "")),
+                **self.setProductTags(post.get("tag_names", None))
+            }
+
+            for field in required_fields:
+
+                if post.get(field, None):
+                    del product_val[field]
+
+            # Create the product template record
+            new_product = request.env['product.template'].sudo().create(product_val)
+            
+            context = {
+                'product': self.normalizeProducts(new_product.read()[0])
+            }
+
+            return Response(
+                json.dumps(context),
+                status=200,
+                headers=[('Content-Type', 'application/json')]
+            )
+        except Exception as e:
+            
+            context = {
+                'error': 'error_found',
+                'error_description': str(e)
+            }
+            
+            return Response(
+                json.dumps(context),
+                status=400,
+                headers=[('Content-Type', 'application/json')]
+            )
+    
+
+    @http.route(
+        '/garm/product/<int:product_id>',
+        type='http',
+        auth='public',
+        methods=['PUT'],
+        csrf=False
+    )
+    def update_product(self, product_id, **kwargs):
+        oauth = authenticate()
+
+        if not oauth:
+            return Response(
+                json.dumps({
+                    "error": "unauthorized",
+                    "error_description": "Unauthorized access"
+                }),
+                status=400,
+                headers=[('Content-Type', 'application/json')]
+            )
+
+        try:
+            product = request.env["product.template"].sudo().browse(product_id)
+
+            if not product.exists():
+                return Response(
+                    json.dumps({
+                        "error": "not_found",
+                        "error_description": f"Product with ID {product_id} does not exist."
+                    }),
+                    status=404,
+                    headers=[('Content-Type', 'application/json')]
+                )
+
+            product.sudo().write(kwargs)
+            
+            context = {
+                'product': self.normalizeProducts(product.read()[0])
+            }
+
+            return Response(
+                json.dumps(context),
+                status=200,
+                headers=[('Content-Type', 'application/json')]
+            )
+        except Exception as e:
+            
+            context = {
+                'error': 'error_found',
+                'error_description': str(e)
+            }
+            
+            return Response(
+                json.dumps(context),
+                status=400,
+                headers=[('Content-Type', 'application/json')]
+            )
+
+        

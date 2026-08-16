@@ -81,34 +81,8 @@ class GarmProductController(http.Controller):
             "is_published": False
         }
 
-    def addCustomProductFields(self, product, products_data, serialized_attributes):
+    def productVariantMap(self, product):
         base_url = request.env['ir.config_parameter'].sudo().get_param('web.base.url')
-
-        unique_hash = product.write_date.strftime('%Y%m%d%H%M%S') if product.write_date else '1'
-        main_image_url = f"{base_url}/web/image?model=product.template&id={product.id}&field=image_1920&unique={unique_hash}"
-        
-        media = request.env['product.image'].search([('product_tmpl_id', '=', product.id)])
-        tags_data = []
-        for tag in product['product_tag_ids']:
-            tags_data.append({
-                'tag_id': tag['id'],
-                'tag_name': tag['name'],
-                'color_index': tag['color']
-            })
-
-        products_data["attribute"] = serialized_attributes
-        products_data['status'] = self.getProductStatus(products_data)
-        products_data['slug'] = f"{request.env['ir.http']._slugify(products_data['name'])}-{products_data['id']}"
-        products_data['website_description'] = products_data['website_description'] or ''
-        products_data['description_ecommerce'] = products_data['description_ecommerce'] or ''
-        products_data['display_image'] = {
-            'id': media.id,
-            'name': media.name,
-            'url': main_image_url
-        }
-        products_data['tags'] = tags_data
-
-
         variants = request.env["product.product"].sudo().search(
             domain=[('product_tmpl_id', '=', product.id), ('active', '=', True)]
         )
@@ -160,7 +134,38 @@ class GarmProductController(http.Controller):
                 'attribute_data': attribute_data
             })
 
-        products_data['product_variants'] = variant_map
+        return variant_map
+
+    def addCustomProductFields(self, product, products_data, serialized_attributes):
+        base_url = request.env['ir.config_parameter'].sudo().get_param('web.base.url')
+
+        unique_hash = product.write_date.strftime('%Y%m%d%H%M%S') if product.write_date else '1'
+        main_image_url = f"{base_url}/web/image?model=product.template&id={product.id}&field=image_1920&unique={unique_hash}"
+        
+        media = request.env['product.image'].search([('product_tmpl_id', '=', product.id)])
+        tags_data = []
+        for tag in product['product_tag_ids']:
+            tags_data.append({
+                'tag_id': tag['id'],
+                'tag_name': tag['name'],
+                'color_index': tag['color']
+            })
+
+        products_data["attribute"] = serialized_attributes
+        products_data['status'] = self.getProductStatus(products_data)
+        products_data['slug'] = f"{request.env['ir.http']._slugify(products_data['name'])}-{products_data['id']}"
+        products_data['website_description'] = products_data['website_description'] or ''
+        products_data['description_ecommerce'] = products_data['description_ecommerce'] or ''
+        products_data['display_image'] = {
+            'id': media.id,
+            'name': media.name,
+            'url': main_image_url
+        }
+        products_data['tags'] = tags_data
+
+
+        
+        products_data['product_variants'] = self.productVariantMap(product)
         return products_data
 
     @http.route(
@@ -593,6 +598,82 @@ class GarmProductController(http.Controller):
             "product_tag_ids": tag_commands
         }
 
+    def setProductVariant(self, attributes):
+        # Process attributes to build the variants
+        if attributes and isinstance(attributes, list):
+            attribute_line_commands = []
+            
+            for attr_data in attributes:
+                attr_name = attr_data.get('name')
+                value_names = attr_data.get('values', [])
+                
+                if not attr_name or not value_names:
+                    continue
+                    
+                # 1. Find or create the master Attribute (e.g., "Color")
+                attribute = request.env['product.attribute'].sudo().search([('name', '=', attr_name)], limit=1)
+                if not attribute:
+                    attribute = request.env['product.attribute'].sudo().create({'name': attr_name})
+                
+                # 2. Find or create the Attribute Values (e.g., "Red", "Blue")
+                value_ids = []
+                for val_name in value_names:
+                    value = request.env['product.attribute.value'].sudo().search([
+                        ('name', '=', val_name),
+                        ('attribute_id', '=', attribute.id)
+                    ], limit=1)
+                    if not value:
+                        value = request.env['product.attribute.value'].sudo().create({
+                            'name': val_name,
+                            'attribute_id': attribute.id
+                        })
+                    value_ids.append(value.id)
+                
+                # 3. Use Odoo command (0, 0, vals) to create a new attribute line item
+                if value_ids:
+                    attribute_line_commands.append((0, 0, {
+                        'attribute_id': attribute.id,
+                        'value_ids': [(6, 0, value_ids)]  # Link all value IDs to this line
+                    }))
+            
+            return {
+                "attribute_line_ids": attribute_line_commands
+            }
+
+        return {}
+
+    def updateProductVariant(self, product, variant_items):
+        if variant_items and isinstance(variant_items, dict):
+            product_variants = self.productVariantMap(product)
+
+            for product_variant in product_variants:
+                attr_comb = "".join(f"_value['{value_name}']" for key, value_name in product_variant.items())
+
+                if variant_items.get(attr_comb, None):
+                    variant = request.env['product.product'].sudo().browse(product_variant["variant_id"])
+
+                    if variant:
+                        variant.sudo().write(variant_items[attr_comb])
+                        variant_item = variant_items[attr_comb]
+
+                        if variant_item.get('lst_price', None):
+                            new_price = float(variant_item['lst_price'])
+                            base_template_price = variant.product_tmpl_id.list_price
+                            # Calculate required variance relative to the base template catalog price
+                            variant.price_extra = new_price - base_template_price
+
+                        if variant_item.get('qty_available', None):
+                            new_qty = float(variant_item['qty_available'])
+                            
+                            # Use Odoo's standard core stock change wizard mechanism
+                            qty_wizard = request.env['stock.change.product.qty'].create({
+                                'product_id': variant.id,
+                                'new_quantity': new_qty,
+                            })
+                            # Triggers internal stock moves to reconcile inventory
+                            qty_wizard.change_product_qty()
+
+
     @http.route(
         '/garm/product',
         type='http',
@@ -627,7 +708,8 @@ class GarmProductController(http.Controller):
                         headers=[('Content-Type', 'application/json')]
                     )
 
-            required_fields = ["status", "tag_names"]
+            required_fields = ["status"]
+            optional_fields = ["attributes", "variant_items", "tag_names"]
 
             for field in required_fields:
 
@@ -644,17 +726,21 @@ class GarmProductController(http.Controller):
             product_val = {
                 **post, 
                 **self.setProductStatus(post.get("status", "")),
-                **self.setProductTags(post.get("tag_names", None))
+                **self.setProductTags(post.get("tag_names", None)),
+                **self.setProductVariant(post.get("attributes", None))
             }
 
-            for field in required_fields:
+            variant_items = post.get("variant_items", None)
 
-                if post.get(field, None):
-                    del product_val[field]
+            product_val = {k: v for k, v in product_val.items() if k not in [*required_fields, *optional_fields]}
+            
 
             # Create the product template record
             new_product = request.env['product.template'].sudo().create(product_val)
             
+            if variant_items:
+                self.updateProductVariant(new_product, variant_items)
+
             context = {
                 'product': self.normalizeProducts(new_product.read()[0])
             }

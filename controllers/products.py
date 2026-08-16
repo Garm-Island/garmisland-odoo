@@ -851,4 +851,67 @@ class GarmProductController(http.Controller):
                 headers=[('Content-Type', 'application/json')]
             )
 
+    @http.route(
+        '/garm/product/<int:product_id>',
+        type='http',
+        auth='public',
+        methods=['DELETE'],
+        csrf=False
+    )
+    def delete_product(self, product_id, **kwargs):
+        oauth = authenticate()
+
+        if not oauth:
+            return Response(
+                json.dumps({
+                    "error": "unauthorized",
+                    "error_description": "Unauthorized access"
+                }),
+                status=400,
+                headers=[('Content-Type', 'application/json')]
+            )
+
+        product = request.env["product.template"].sudo().browse(product_id)
+
+        if not product.exists():
+            return Response(
+                json.dumps({
+                    "error": "not_found",
+                    "error_description": f"Product with ID {product_id} does not exist."
+                }),
+                status=404,
+                headers=[('Content-Type', 'application/json')]
+            )
+
+        try:
+            variants = request.env['product.product'].sudo().search([
+                ('product_tmpl_id', '=', product_id),
+                ('active', 'in', [True, False])
+            ])
+            variant_count = len(variants)
+
+            if variants:
+                variants.unlink()
+
+            product.unlink()
+
+            return Response(
+                json.dumps({
+                    "deleted": True,
+                    "product_id": product_id,
+                    "variants_deleted": variant_count
+                }),
+                status=200,
+                headers=[('Content-Type', 'application/json')]
+            )
+        except Exception as e:
+            return Response(
+                json.dumps({
+                    "error": "delete_failed",
+                    "error_description": str(e)
+                }),
+                status=400,
+                headers=[('Content-Type', 'application/json')]
+            )
+
         

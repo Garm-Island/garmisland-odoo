@@ -771,7 +771,7 @@ class GarmProductController(http.Controller):
         methods=['PUT'],
         csrf=False
     )
-    def update_product(self, product_id, **kwargs):
+    def update_product(self, product_id, **post):
         oauth = authenticate()
 
         if not oauth:
@@ -785,6 +785,33 @@ class GarmProductController(http.Controller):
             )
 
         try:
+            if not post and request.httprequest.data:
+                try:
+                    post = json.loads(request.httprequest.data.decode('utf-8'))
+                except ValueError:
+                    return Response(
+                        json.dumps({
+                            "error": "invalid_json",
+                            "error_description": "Malformed JSON payload"
+                        }),
+                        status=400,
+                        headers=[('Content-Type', 'application/json')]
+                    )
+
+            required_fields = ["status"]
+            optional_fields = ["attributes", "variant_items", "tag_names"]
+
+            product_val = {
+                **post, 
+                **self.setProductStatus(post.get("status", "")),
+                **self.setProductTags(post.get("tag_names", None)),
+                **self.setProductVariant(post.get("attributes", None))
+            }
+
+            variant_items = post.get("variant_items", None)
+
+            product_val = {k: v for k, v in product_val.items() if k not in [*required_fields, *optional_fields]}
+
             product = request.env["product.template"].sudo().browse(product_id)
 
             if not product.exists():
@@ -797,7 +824,10 @@ class GarmProductController(http.Controller):
                     headers=[('Content-Type', 'application/json')]
                 )
 
-            product.sudo().write(kwargs)
+            product.sudo().write(product_val)
+
+            if variant_items:
+                self.updateProductVariant(product, variant_items)
             
             context = {
                 'product': self.normalizeProducts(product.read()[0])

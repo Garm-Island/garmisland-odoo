@@ -8,7 +8,7 @@
     "category": "Inventory Sync",
     "summary": """Garm Island syncs products and orders across your retail channels. Keep your inventory aligned.""",
     "description": """Garm Island syncs products and orders across your retail channels. Keep your inventory aligned.""",
-    'depends': ['base', 'web', 'product'],
+    'depends': ['base', 'web', 'product', 'sale_management'],
     'data': [
         'security/ir.model.access.csv',
         'views/garmisland_authorization_views.xml'

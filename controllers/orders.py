@@ -6,6 +6,7 @@ import json
 import math
 import base64
 from urllib.parse import parse_qsl
+from odoo.tools import html2plaintext
 from .oauth import authenticate
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,82 @@ class GarmOrderController(http.Controller):
                     result[key] = str(val)
 
         return result
+
+    def _parse_order_note(self, note):
+        if not note:
+            return {}
+
+        note_value = html2plaintext(note).strip()
+        try:
+            parsed = json.loads(note_value)
+            return parsed if isinstance(parsed, dict) else {'note': note_value}
+        except (TypeError, ValueError):
+            return {'note': note_value}
+
+    def _format_order(self, order, lines=None):
+        order_obj = self.normalizeOrder(order)
+        order_obj['lines'] = lines or []
+        partner_id = order_obj.get('partner_id')
+        partner = request.env['res.partner'].sudo().browse(
+            partner_id[0] if isinstance(partner_id, list) else partner_id
+        ) if partner_id else request.env['res.partner']
+        order_obj['customer'] = self._customer_data(partner)
+        note_payload = self._parse_order_note(order_obj.get('note'))
+        shipping_partner = self._partner_from_order_field(order_obj.get('partner_shipping_id'))
+        billing_partner = self._partner_from_order_field(order_obj.get('partner_invoice_id'))
+        order_obj['customer_shipping_address'] = self._address_data(shipping_partner) or note_payload.get('shipping_address') or note_payload.get('customer_shipping_address') or {}
+        order_obj['customer_billing_address'] = self._address_data(billing_partner) or note_payload.get('billing_address') or note_payload.get('customer_billing_address') or {}
+        order_obj['custom_customer'] = note_payload.get('custom_customer') or note_payload.get('customer') or {}
+        order_obj['shipping_lines'] = note_payload.get('shipping_lines') or note_payload.get('shipping_line_details') or []
+        order_obj['item_lines'] = note_payload.get('item_lines') or note_payload.get('line_items') or order_obj['lines']
+        order_obj['custom_item_lines'] = note_payload.get('item_lines') or note_payload.get('line_items') or note_payload.get('custom_item_lines') or []
+        order_obj['discount_code'] = note_payload.get('discount_code') or note_payload.get('coupon_code') or note_payload.get('promo_code') or note_payload.get('discount') or None
+        order_obj['order_metadata'] = note_payload
+        return order_obj
+
+    def _customer_data(self, customer):
+        if not customer or not customer.exists():
+            return {}
+        return {
+            'id': customer.id,
+            'name': customer.name,
+            'email': customer.email,
+            'phone': customer.phone,
+            'mobile': customer.mobile,
+            'company': customer.commercial_company_name,
+            'street': customer.street,
+            'street2': customer.street2,
+            'city': customer.city,
+            'zip': customer.zip,
+            'state': customer.state_id.name,
+            'state_id': customer.state_id.id,
+            'country': customer.country_id.name,
+            'country_id': customer.country_id.id,
+        }
+
+    def _partner_from_order_field(self, value):
+        if not value:
+            return request.env['res.partner']
+        partner_id = value[0] if isinstance(value, list) else value
+        return request.env['res.partner'].sudo().browse(partner_id)
+
+    def _address_data(self, address):
+        if not address or not address.exists():
+            return {}
+        return {
+            'id': address.id,
+            'name': address.name,
+            'email': address.email,
+            'phone': address.phone,
+            'street': address.street,
+            'street2': address.street2,
+            'city': address.city,
+            'zip': address.zip,
+            'state': address.state_id.name,
+            'state_id': address.state_id.id,
+            'country': address.country_id.name,
+            'country_id': address.country_id.id,
+        }
 
     def _clean_dict(self, value):
         if not isinstance(value, dict):
@@ -398,28 +475,7 @@ class GarmOrderController(http.Controller):
 
         clean_orders = []
         for order in orders:
-            order_obj = self.normalizeOrder(order)
-            order_obj['lines'] = lines_by_order.get(order['id'], [])
-            note_payload = {}
-            if order_obj.get('note'):
-                try:
-                    parsed = json.loads(order_obj.get('note'))
-                    if isinstance(parsed, dict):
-                        note_payload = parsed
-                except Exception:
-                    note_payload = {'note': order_obj.get('note')}
-
-            order_obj['customer_shipping_address'] = note_payload.get('shipping_address') or note_payload.get('customer_shipping_address') or {}
-            order_obj['customer_billing_address'] = note_payload.get('billing_address') or note_payload.get('customer_billing_address') or {}
-            order_obj['custom_customer'] = note_payload.get('custom_customer') or note_payload.get('customer') or {}
-            order_obj['shipping_lines'] = note_payload.get('shipping_lines') or note_payload.get('shipping_line_details') or []
-            order_obj['item_lines'] = note_payload.get('item_lines') or note_payload.get('line_items') or order_obj['lines']
-            order_obj['custom_item_lines'] = note_payload.get('item_lines') or note_payload.get('line_items') or note_payload.get('custom_item_lines') or []
-            order_obj['discount_code'] = note_payload.get('discount_code') or note_payload.get('coupon_code') or note_payload.get('promo_code') or note_payload.get('discount') or None
-            order_obj['order_metadata'] = note_payload.get('metadata') if note_payload.get('metadata') is not None else (note_payload.get('order_metadata') if note_payload.get('order_metadata') is not None else {})
-            if order_obj['discount_code'] and 'discount_code' not in order_obj['order_metadata']:
-                order_obj['order_metadata']['discount_code'] = order_obj['discount_code']
-            clean_orders.append(order_obj)
+            clean_orders.append(self._format_order(order, lines_by_order.get(order['id'], [])))
 
         context = {
             "orders": clean_orders,
@@ -606,6 +662,52 @@ class GarmOrderController(http.Controller):
                 status=400,
                 headers=[('Content-Type', 'application/json')]
             )
+
+    @http.route(
+        '/garm/order/<int:order_id>',
+        type='http',
+        auth='public',
+        methods=['GET'],
+        csrf=False
+    )
+    def get_order_by_id(self, order_id, **kwargs):
+        oauth = authenticate()
+
+        if not oauth:
+            return Response(
+                json.dumps({
+                    'error': 'unauthorized',
+                    'error_description': 'Unauthorized access',
+                }),
+                status=400,
+                headers=[('Content-Type', 'application/json')]
+            )
+
+        order = request.env['sale.order'].sudo().browse(order_id)
+        if not order.exists():
+            return Response(
+                json.dumps({
+                    'error': 'not_found',
+                    'error_description': f'Order with ID {order_id} does not exist.',
+                }),
+                status=404,
+                headers=[('Content-Type', 'application/json')]
+            )
+
+        lines = request.env['sale.order.line'].sudo().search_read(
+            domain=[('order_id', '=', order.id)],
+            fields=[
+                'id', 'order_id', 'product_id', 'name', 'product_uom_qty',
+                'qty_delivered', 'price_unit', 'discount', 'price_subtotal',
+                'price_total', 'state',
+            ],
+        )
+        lines = [self.normalizeOrderLine(line) for line in lines]
+        return Response(
+            json.dumps({'order': self._format_order(order.read()[0], lines)}),
+            status=200,
+            headers=[('Content-Type', 'application/json')]
+        )
 
     @http.route(
         '/garm/order/<int:order_id>',

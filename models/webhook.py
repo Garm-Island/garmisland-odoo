@@ -6,11 +6,12 @@ import logging
 import requests
 
 from odoo import api, fields, models
+from odoo.tools import html2plaintext
 
 
 _logger = logging.getLogger(__name__)
 
-_app_url = "https://garmisland.com"
+_app_url = "http://localhost/garmisland/public/api/odoo/webhook"
 _app_secret = "your_app_secret_here"  # Replace with your actual app secret
 
 class GarmWebhookDispatcher(models.AbstractModel):
@@ -20,15 +21,18 @@ class GarmWebhookDispatcher(models.AbstractModel):
     @api.model
     def dispatch(self, event, record, data=None):
         parameters = self.env['ir.config_parameter'].sudo()
+        website_name = self.env['website'].get_current_website().get_base_url()
         webhook_url = _app_url
         secret = _app_secret
         
         payload = {
             'event': event,
+            'topic': event.replace('.', '_').upper(),
             'model': record._name,
+            "shop_domain": website_name,
             'record_id': record.id,
             'occurred_at': fields.Datetime.now().isoformat(),
-            'data': data if data is not None else self._record_data(record),
+            'payload': data if data is not None else self._record_data(record),
         }
         body = json.dumps(payload, default=str, separators=(',', ':'))
         headers = {'Content-Type': 'application/json'}
@@ -150,7 +154,9 @@ class GarmWebhookDispatcher(models.AbstractModel):
 
     @api.model
     def _order_data(self, order):
+        customer = order.partner_id.sudo()
         order_data = self._json_safe(order.read()[0])
+        order_data['customer'] = self._customer_data(customer)
         order_data['lines'] = self._json_safe(self.env['sale.order.line'].sudo().search_read(
             [('order_id', '=', order.id)],
             fields=[
@@ -160,22 +166,61 @@ class GarmWebhookDispatcher(models.AbstractModel):
         ))
         note_payload = {}
         if order_data.get('note'):
+            note_value = html2plaintext(order_data['note']).strip()
             try:
-                parsed = json.loads(order_data['note'])
+                parsed = json.loads(note_value)
                 note_payload = parsed if isinstance(parsed, dict) else {'note': order_data['note']}
             except (TypeError, ValueError):
-                note_payload = {'note': order_data['note']}
-        order_data['customer_shipping_address'] = note_payload.get('shipping_address') or note_payload.get('customer_shipping_address') or {}
-        order_data['customer_billing_address'] = note_payload.get('billing_address') or note_payload.get('customer_billing_address') or {}
+                note_payload = {'note': note_value}
+        order_data['customer_shipping_address'] = self._address_data(order.partner_shipping_id) or note_payload.get('shipping_address') or note_payload.get('customer_shipping_address') or {}
+        order_data['customer_billing_address'] = self._address_data(order.partner_invoice_id) or note_payload.get('billing_address') or note_payload.get('customer_billing_address') or {}
         order_data['custom_customer'] = note_payload.get('custom_customer') or note_payload.get('customer') or {}
         order_data['shipping_lines'] = note_payload.get('shipping_lines') or note_payload.get('shipping_line_details') or []
         order_data['item_lines'] = note_payload.get('item_lines') or order_data['lines']
         order_data['custom_item_lines'] = note_payload.get('custom_item_lines') or []
         order_data['discount_code'] = note_payload.get('discount_code')
-        order_data['order_metadata'] = note_payload.get('order_metadata') or note_payload.get('metadata') or {}
-        if order_data['discount_code'] and isinstance(order_data['order_metadata'], dict):
-            order_data['order_metadata'].setdefault('discount_code', order_data['discount_code'])
+        order_data['order_metadata'] = note_payload
         return self._json_safe(order_data)
+
+    @api.model
+    def _customer_data(self, customer):
+        if not customer:
+            return {}
+        return self._json_safe({
+            'id': customer.id,
+            'name': customer.name,
+            'email': customer.email,
+            'phone': customer.phone,
+            'mobile': customer.mobile,
+            'company': customer.commercial_company_name,
+            'street': customer.street,
+            'street2': customer.street2,
+            'city': customer.city,
+            'zip': customer.zip,
+            'state': customer.state_id.name,
+            'state_id': customer.state_id.id,
+            'country': customer.country_id.name,
+            'country_id': customer.country_id.id,
+        })
+
+    @api.model
+    def _address_data(self, address):
+        if not address:
+            return {}
+        return self._json_safe({
+            'id': address.id,
+            'name': address.name,
+            'email': address.email,
+            'phone': address.phone,
+            'street': address.street,
+            'street2': address.street2,
+            'city': address.city,
+            'zip': address.zip,
+            'state': address.state_id.name,
+            'state_id': address.state_id.id,
+            'country': address.country_id.name,
+            'country_id': address.country_id.id,
+        })
 
     @classmethod
     def _json_safe(cls, value):

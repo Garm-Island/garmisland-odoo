@@ -284,3 +284,38 @@ class GarmSaleOrder(models.Model):
                     'order': dispatcher._record_data(record),
                 })
         return result
+
+    @api.depends('picking_ids', 'picking_ids.state')
+    def _compute_delivery_status(self):
+        # override must keep @api.depends, otherwise the ORM loses the recompute trigger and this never runs.
+        previous_statuses = {order.id: order.delivery_status for order in self}
+        super()._compute_delivery_status()
+        dispatcher = self.env['garm.webhook.dispatcher']
+        for order in self:
+            if previous_statuses.get(order.id) != order.delivery_status:
+                dispatcher.dispatch('order.delivery_status_updated', order, {
+                    'previous_delivery_status': previous_statuses.get(order.id),
+                    'delivery_status': order.delivery_status,
+                    'order': dispatcher._record_data(order),
+                })
+
+
+class GarmStockQuant(models.Model):
+    _inherit = 'stock.quant'
+
+    def write(self, vals):
+        previous_quantities = {}
+        if 'quantity' in vals:
+            previous_quantities = {quant.id: quant.quantity for quant in self}
+        result = super().write(vals)
+        if previous_quantities:
+            dispatcher = self.env['garm.webhook.dispatcher']
+            for quant in self:
+                if quant.product_id and previous_quantities.get(quant.id) != quant.quantity:
+                    dispatcher.dispatch('product.quantity_updated', quant.product_id.product_tmpl_id, {
+                        'product_id': quant.product_id.id,
+                        'previous_quantity': previous_quantities.get(quant.id),
+                        'quantity': quant.quantity,
+                        'quantity_available': quant.product_id.qty_available,
+                    })
+        return result
